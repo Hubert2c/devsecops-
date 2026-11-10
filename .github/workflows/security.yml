@@ -1,0 +1,97 @@
+# DevSecOps pipeline: four security checks that run on every pull request.
+# Final state after Drill 5. Every job lists its policy in the comments.
+name: Security
+
+on:
+  push:
+    branches: [devsecops-scans]
+  pull_request:        # run on every PR
+  workflow_dispatch:   # lets you click "Run workflow" by hand in the Actions tab
+
+# Least privilege: the jobs only need to read the code.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. CODE: Bandit scans the Python source for insecure patterns.
+  # Policy: BLOCK on Medium or High severity, REPORT (not block) on Low.
+  # Low findings like B105 are worth seeing, but they are often noisy guesses.
+  # Medium/High (shell injection, unsafe deserialization, etc.) are real
+  # enough to stop a merge.
+  # ---------------------------------------------------------------------------
+  code:
+    name: Code scan (Bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install bandit
+        run: python -m pip install --upgrade bandit
+      # Step A: print EVERY finding, Low included, without failing (--exit-zero).
+      - name: Bandit report (all severities)
+        run: bandit -r . -f screen --exit-zero
+      # Step B: the gate. Only Medium and above make this step exit 1.
+      - name: Bandit gate (Medium and above)
+        run: bandit -r . -f screen --severity-level medium
+
+  # ---------------------------------------------------------------------------
+  # 2. SECRETS: gitleaks scans the commits in this PR.
+  # Policy: any real secret, ever, blocks. No threshold.
+  # ---------------------------------------------------------------------------
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0               # full history, so gitleaks can see every commit
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          # The action needs the token to read the PR's commit range.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Don't try to post PR comments: the job only has read permission.
+          GITLEAKS_ENABLE_COMMENTS: false
+
+  # ---------------------------------------------------------------------------
+  # 3. IMAGE: build the Docker image and scan it with Trivy.
+  # Policy: fail on CRITICAL vulnerabilities that HAVE a published fix.
+  # (ignore-unfixed: if no fix exists yet, there's nothing we can do today,
+  # and blocking on it would only teach the team to disable the gate.)
+  # ---------------------------------------------------------------------------
+  image:
+    name: Image scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t campus-notifier:dev .
+      - name: Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: campus-notifier:dev
+          severity: CRITICAL           # Drill 5: was HIGH,CRITICAL
+          ignore-unfixed: true         # only count vulnerabilities with a fix available
+          exit-code: "1"               # Drill 5: was "0" (warn) -> now blocks
+          format: table
+
+  # ---------------------------------------------------------------------------
+  # 4. IaC: Checkov scans the Terraform for insecure patterns.
+  # Policy: any failed check blocks. Accepted risks must be suppressed in the
+  # .tf file itself with a `#checkov:skip=<ID>:<reason>` comment.
+  # ---------------------------------------------------------------------------
+  iac:
+    name: IaC scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: terraform
+          quiet: true                  # only print failed checks
+          soft_fail: false             # Drill 5: was true (warn) -> now blocks

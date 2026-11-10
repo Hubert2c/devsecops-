@@ -1,4 +1,4 @@
-Django==5.2.7
+Django==5.2.19
 psycopg2-binary==2.9.11
 python-decouple==3.8
 pre-commit

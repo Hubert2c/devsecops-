@@ -11,6 +11,13 @@ resource "aws_ecr_repository" "devops_repo" {
     scan_on_push = true
   }
 
+  # Checkov CKV_AWS_136: encrypt images at rest with KMS instead of the
+  # default AES256. With no kms_key set, AWS uses its managed key
+  # (aws/ecr), so there is no extra key to create or pay for.
+  encryption_configuration {
+    encryption_type = "KMS"
+  }
+
   # Tags are good practice for organization
   tags = {
     Environment = "Testing"

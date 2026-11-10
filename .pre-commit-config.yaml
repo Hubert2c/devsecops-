@@ -9,3 +9,12 @@ repos:
         # args: [--fix, --exit-zero-on-fix] # Fix issues and exit with zero if fixes are applied.
       # Ruff for formatting.
       - id: ruff-format
+
+  # Leak check: gitleaks scans the STAGED changes on every `git commit`.
+  # If it sees something that looks like a real credential, it exits with
+  # code 1 and git refuses the commit. The "-docker" variant runs gitleaks
+  # inside a container, so Docker must be running but nothing else is needed.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks-docker
